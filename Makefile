@@ -1,22 +1,29 @@
-stencil: stencil.c
-	icc -std=c99 -Wall -Ofast -xHOST stencil.c -o stencil
-	./stencil 1024 1024 100
+#
+# Makefile to build example MPI programs
+#
 
-big: stencil.c
-	icc -std=c99 -Wall -Ofast stencil.c -o stencil
-	./stencil 4096 4096 100
+CC=mpicc
+CXX=mpiCC
+FC=mpif77
+F90=mpif90
 
-gpr: stencil.c
-	icc -std=c99 -pg -fopenmp -g -o stream.gprof stencil.c
-	./stream.gprof 1024 1024 100
-	gprof -b -l stream.gprof gmon.out
+COMP=GNU
 
-gcc: stencil.c
-	gcc -std=c99 -Wall -Ofast stencil.c -o stencil
-	./stencil 1024 1024 100
+ifeq ($(COMP), GNU)
+  CFLAGS=-Wall
+  FFLAGS=-Wall
+endif
 
-vec: stencil.c
-	icc -std=c99 -Wall $^ -o $@ -qopt-report=1 -qopt-report-phase=vec
-	vim stencil.optrpt
-check: 
-	python check.py --ref-stencil-file stencil_8000_8000_100.pgm --stencil-file stencil.pgm --verbose
+EXES=stencil
+
+
+hello_world_c: stencil.c
+	$(CC) $(CFLAGS) -o $@ $^
+
+all: $(EXES)
+
+.PHONY: clean all
+
+clean:
+	\rm -f $(EXES)
+	\rm -f *.o

@@ -2,6 +2,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/time.h>
+#include "mpi.h"
+
+#define NROWS 16
+#define MASTER 0
 
 // Define output file name
 #define OUTPUT_FILE "stencil.pgm"
@@ -24,20 +28,82 @@ int main(int argc, char *argv[]) {
   int ny = atoi(argv[2]);     //Dimension y
   int niters = atoi(argv[3]); //Number of iterations
 
-  // Allocate the image
-  float *image = malloc(sizeof(float)*nx*ny);
-  float *tmp_image = malloc(sizeof(float)*nx*ny);
+  //----------------------------------------------------------------------------
+  //MPI section here
+  //----------------------------------------------------------------------------
 
-  // Set the input image
-  init_image(nx, ny, image, tmp_image);
+  int rank;
+  int above;
+  int below;
+  int tag = 0;
+  int local_nrows;
+  int local_ncols;
+  int size;
 
-  // Call the stencil kernel
-  double tic = wtime();
+  //InitMPI
+  MPI_Init(&argc, &argv);
+  MPI_Comm_size( MPI_COMM_WORLD, &size );
+  MPI_Comm_rank( MPI_COMM_WORLD, &rank );
+
+  //Calculate size of local rows
+  local_ncols = nx;
+  local_nrows = calc_nrows_from_rank(rank, size - 1, ny);
+
+  //Master branch
+  if(rank==MASTER){
+
+    // Allocate the image
+    float *image = malloc(sizeof(float)*nx*ny);
+    float *tmp_image = malloc(sizeof(float)*nx*ny);
+
+    init_image(nx, ny, image, tmp_image);
+
+    // Call the stencil kernel
+    double tic = wtime();
+
+    //Distribute
+    for (int i = 1; i < (rank-1); i++) {
+      for (int j = 0; j < (local_ncols*(local_nrows+2))-1; j++) {
+
+
+      }
+
+
+    }
+
+    //Regather
+
+    double toc = wtime();
+
+  }
+
+  else if(rank == 1){
+    //Set ranks of the processes above and below
+    below = rank + 1;
+
+  }
+
+  else if(rank == (size - 1)){
+
+
+  }
+
+  else{
+    //Local process image
+    float *local_image = malloc(sizeof(float)*local_ncols*(local_nrows+2));
+    float *tmp_local_image = malloc(sizeof(float)*local_ncols*(local_nrows+2));
+
+
+  }
+
+
   for (int t = 0; t < niters; ++t) {
     stencil(nx, ny, image, tmp_image);
     stencil(nx, ny, tmp_image, image);
   }
-  double toc = wtime();
+
+  MPI_Finalize();
+
 
 
   // Output
@@ -52,7 +118,7 @@ int main(int argc, char *argv[]) {
 //START HERE
 //const image
 
-//CRITICAL CODE -----------------------------------------------------------------------------------------------------------------------------------
+// Stencil given image
 void stencil(const int nx, const int ny, float * restrict image, float * restrict tmp_image) {
   //Top left
   tmp_image[0] = image[0]*0.6f + (image[nx] + image[1])*0.1f;
@@ -98,8 +164,6 @@ void stencil(const int nx, const int ny, float * restrict image, float * restric
   //   }
   // }
 }
-
-//CRITICAL CODE -----------------------------------------------------------------------------------------------------------------------------------
 
 // Create the input image
 void init_image(const int nx, const int ny, float *  image, float *  tmp_image) {
@@ -165,4 +229,17 @@ double wtime(void) {
   struct timeval tv;
   gettimeofday(&tv, NULL);
   return tv.tv_sec + tv.tv_usec*1e-6;
+}
+
+// Calculate the number of rows for each process
+int calc_nrows_from_rank(int rank, int size, int ny){
+  int nrows;
+
+  nrows = ny / size;       /* integer division */
+  if ((ny % size) != 0) {  /* if there is a remainder */
+    if (rank == size - 1)
+      nrows += NROWS % size;  /* add remainder to last rank */
+  }
+
+  return nrows;
 }
