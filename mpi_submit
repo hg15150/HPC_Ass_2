@@ -3,16 +3,16 @@
 #PBS -N MPI
 #PBS -o OUT
 #PBS -q teaching
-#PBS -l nodes=1:ppn=16,walltime=00:05:00
+#PBS -l nodes=1:ppn=16,walltime=00:00:12
 
 #! Mail to user if job aborts
 #PBS -m a
 
 #! application name
-application="stencil"
+application="./stencil"
 
 #! Run options for the application
-options=""
+options="1024 1024 100"
 
 ###############################################################
 ### You should not have to change anything below this line ####
