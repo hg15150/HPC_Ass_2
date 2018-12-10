@@ -24,7 +24,8 @@ int tag = 0;
 MPI_Status status;
 int local_nrows = 0;
 int local_ncols = 0;
-int remainder = 0;
+int rem = 0;
+int image_portion;
 
 int main(int argc, char *argv[]) {
 
@@ -60,17 +61,21 @@ int main(int argc, char *argv[]) {
   MPI_Comm_rank( MPI_COMM_WORLD, &rank );
 
   //Calculate size of local rows
-  local_nrows = calc_nrows_from_rank(rank, size - 1, ny);
-  local_ncols = nx;
-  remainder = ny % size;
+  // local_nrows = calc_nrows_from_rank(rank, size - 1, ny);
+  // local_ncols = ny/(size-1);
+  // rem = ny % (size-1);
 
+  int R = nx;
+  int n_rows = ny/(size-1);
+  int P = R*n_rows;
+  int Rem = (ny%(size-1))*nx;
+
+  printf("%d\n", Rem);
   above = rank-1;
   below = rank+1;
 
   //Master branch
   if(rank==MASTER){
-    printf("Rank: %d, rows: %d, remainder: %d\n", rank, local_nrows, remainder);
-
 
     // Allocate the image
     float *image = malloc(sizeof(float)*nx*ny);
@@ -79,56 +84,51 @@ int main(int argc, char *argv[]) {
     init_image(nx, ny, image, tmp_image);
 
     //Distribute
-    int process_size = local_ncols*(local_nrows+1);
-    int start_loc = 0;
+    int process_size = P+R;
+    printf("P+R 1: %d\n", process_size);
 
     //First process
     for (int j = 0; j < process_size; j++) {
-        MPI_Ssend(&image[start_loc+j], 1, MPI_FLOAT, 1, tag, MPI_COMM_WORLD);
+        MPI_Ssend(&image[j], 1, MPI_FLOAT, 1, tag, MPI_COMM_WORLD);
     }
-    // printf("Rank %d 1\n", rank);
 
     //Middle sections
-    process_size = local_ncols*(local_nrows+2);
+    process_size = P+2*R;
+    int start_loc = P-R;
     for (int i = 2; i < (size-1); i++) {
-      start_loc = (i-1)*local_nrows*(local_ncols-1);
+      start_loc = ((i-1)*P)-R;
       for (int j = 0; j < process_size; j++) {
           MPI_Ssend(&image[start_loc+j],1, MPI_FLOAT, i, tag, MPI_COMM_WORLD);
       }
     }
-    // printf("Rank %d 2\n", rank);
-
 
     //End section
-    start_loc = ((size-1)-1)*local_ncols*local_nrows;
-    process_size = local_ncols*(local_nrows+1+remainder);
+    start_loc = ((size-2)*P)-R;
+    process_size = P+R+Rem;
 
     for (int j = 0; j < process_size; j++) {
         MPI_Ssend(&image[start_loc+j],1, MPI_FLOAT, size-1, tag, MPI_COMM_WORLD);
     }
 
-    // printf("Rank %d 3\n", rank);
-
     // Call the stencil kernel
     double tic = wtime();
 
     //Regather
-    int image_portion = local_ncols*local_nrows;
     for (int n_rank = 1; n_rank < size-1; n_rank++) {
-      for (int k = 0; k < image_portion; k++) {
-          MPI_Recv(&image[(n_rank-1)*image_portion + k], 1, MPI_FLOAT, n_rank, tag, MPI_COMM_WORLD, &status);
+      int start_loc_recv = (n_rank-1)*P;
+      printf("rank: %d, start: %d\n", rank, start_loc_recv);
+      for (int k = 0; k < P; k++) {
+          MPI_Recv(&image[start_loc_recv + k], 1, MPI_FLOAT, n_rank, tag, MPI_COMM_WORLD, &status);
       }
     }
 
-    // printf("Rank %d 4\n", rank);
-
-
     //Last
-    image_portion = local_ncols*(local_nrows+remainder);
+    image_portion = P+Rem;
+    int start_recv = (size-2)*P;
     for (int k = 0; k < image_portion; k++) {
-        MPI_Recv(&image[((size-1)-1)*image_portion + k], 1, MPI_FLOAT, size-1, tag, MPI_COMM_WORLD, &status);
+        MPI_Recv(&image[start_recv + k], 1, MPI_FLOAT, size-1, tag, MPI_COMM_WORLD, &status);
+        // image[start_recv + k] = 0.0;
     }
-
 
     double toc = wtime();
 
@@ -139,95 +139,82 @@ int main(int argc, char *argv[]) {
 
     output_image(OUTPUT_FILE, nx, ny, image);
     free(image);
-    printf("Rank %d\n", rank);
   }
 
   //First process
   else if(rank == 1){
     // Allocate the image
-    float *image = malloc(sizeof(float)*nx*(local_nrows+1));
-    float *tmp_image = malloc(sizeof(float)*nx*(local_nrows+1));
-    printf("Rank %d: local_nrows = %d\n", rank, local_nrows);
-
+    float *image = malloc(sizeof(float)*(P+R));
+    float *tmp_image = malloc(sizeof(float)*(P+R));
 
     //Get image from master
-    for (int i = 0; i < (local_ncols*(local_nrows+1)); i++) {
+    for (int i = 0; i < P+R; i++) {
       MPI_Recv(&image[i], 1, MPI_FLOAT, MASTER, tag, MPI_COMM_WORLD, &status);
     }
 
     //Iterate through stencil
-    for (int i = 0; i < 1; i++) {
-      // stencilMiddle(local_nrows, local_ncols, image, tmp_local_image);
-      sendTop(local_ncols, local_nrows, tmp_image, rank);
-      // stencilMiddle(local_nrows, local_ncols, tmp_local_image, image);
-      sendTop(local_ncols, local_nrows, image, rank);
-    }
+    // for (int i = 0; i < 1; i++) {
+    //   // stencilMiddle(local_nrows, local_ncols, image, tmp_local_image);
+    //   sendTop(local_ncols, local_nrows, tmp_image, rank);
+    //   // stencilMiddle(local_nrows, local_ncols, tmp_local_image, image);
+    //   sendTop(local_ncols, local_nrows, image, rank);
+    // }
 
     //Send image portion back to master
-    for (int i = 0; i < (local_ncols*(local_nrows)); i++) {
+    for (int i = 0; i < P; i++) {
       MPI_Ssend(&image[i],1, MPI_FLOAT, MASTER, tag, MPI_COMM_WORLD);
     }
-
-    printf("Rank %d\n", rank);
   }
 
   //Last process
   else if(rank == (size - 1)){
-    printf("Rank %d: local_nrows = %d\n", rank, local_nrows);
     // Allocate the image
-    float *image = malloc(sizeof(float)*local_ncols*(local_nrows+1));
-    float *tmp_image = malloc(sizeof(float)*nx*(local_nrows+1));
+    float *image = malloc(sizeof(float)*(P+R+Rem));
+    float *tmp_image = malloc(sizeof(float)*(P+R+Rem));
 
-    for (int i = 0; i < (local_ncols*(local_nrows+1)); i++) {
+    for (int i = 0; i < (P+R+Rem); i++) {
       MPI_Recv(&image[i], 1, MPI_FLOAT, MASTER, tag, MPI_COMM_WORLD, &status);
     }
 
     //Iterate through stencil
-    for (int i = 0; i < 1; i++) {
-      // stencilMiddle(local_nrows, local_ncols, image, tmp_local_image);
-      sendBottom(local_ncols, local_nrows, tmp_image, rank);
-      // stencilMiddle(local_nrows, local_ncols, tmp_local_image, image);
-      sendBottom(local_ncols, local_nrows, image, rank);
+    // for (int i = 0; i < 1; i++) {
+    //   // stencilMiddle(local_nrows, local_ncols, image, tmp_local_image);
+    //   sendBottom(local_ncols, local_nrows, tmp_image, rank);
+    //   // stencilMiddle(local_nrows, local_ncols, tmp_local_image, image);
+    //   sendBottom(local_ncols, local_nrows, image, rank);
+    // }
+
+    for (int i = 0; i < P+Rem; i++) {
+      MPI_Ssend(&image[R+i],1, MPI_FLOAT, MASTER, tag, MPI_COMM_WORLD);
     }
-
-    for (int i = local_ncols; i < (local_ncols*(local_nrows+1)); i++) {
-      MPI_Ssend(&image[i],1, MPI_FLOAT, MASTER, tag, MPI_COMM_WORLD);
-    }
-
-    printf("Rank %d\n", rank);
-
   }
 
   //Middle
   else{
     //Local process image
-    float *image = malloc(sizeof(float)*local_ncols*(local_nrows+2));
-    float *tmp_local_image = malloc(sizeof(float)*local_ncols*(local_nrows+2));
+    float *image = malloc(sizeof(float)*(P+2*R));
+    float *tmp_local_image = malloc(sizeof(float)*(P+2*R));
 
-    printf("Rank %d: local_nrows = %d\n", rank, local_nrows);
-
-
-    for (int i = 0; i < (local_ncols*(local_nrows+2)); i++) {
+    for (int i = 0; i < (P+2*R); i++) {
       MPI_Recv(&image[i], 1, MPI_FLOAT, MASTER, tag, MPI_COMM_WORLD, &status);
     }
     // printf("Rank %d\n", rank);
 
     //Iterate through stencil
-    for (int i = 0; i < 1; i++) {
-      // stencilMiddle(local_nrows, local_ncols, image, tmp_local_image);
-      sendMiddle(local_ncols, local_nrows, tmp_local_image, rank);
-      // stencilMiddle(local_nrows, local_ncols, tmp_local_image, image);
-      sendMiddle(local_ncols, local_nrows, image, rank);
-    }
+    // for (int i = 0; i < 1; i++) {
+    //   // stencilMiddle(local_nrows, local_ncols, image, tmp_local_image);
+    //   sendMiddle(local_ncols, local_nrows, tmp_local_image, rank);
+    //   // stencilMiddle(local_nrows, local_ncols, tmp_local_image, image);
+    //   sendMiddle(local_ncols, local_nrows, image, rank);
+    // }
 
     //Send back to master
-    for (int i = local_ncols; i < (local_ncols*(local_nrows+1)); i++) {
-      MPI_Ssend(&image[i],1, MPI_FLOAT, MASTER, tag, MPI_COMM_WORLD);
+    for (int i = 0; i < P; i++) {
+      MPI_Ssend(&image[R+i],1, MPI_FLOAT, MASTER, tag, MPI_COMM_WORLD);
     }
-    printf("Rank %d\n", rank);
-
   }
 
+  printf("Rank %d\n", rank);
   MPI_Finalize();
 }
 
@@ -416,9 +403,9 @@ int calc_nrows_from_rank(int rank, int size, int ny){
   int nrows;
 
   nrows = ny / size;       /* integer division */
-  if ((ny % size) != 0) {  /* if there is a remainder */
+  if ((ny % size) != 0) {  /* if there is a rem */
     if (rank == size)
-      nrows += ny % size;  /* add remainder to last rank */
+      nrows += ny % size;  /* add rem to last rank */
   }
 
   return nrows;
