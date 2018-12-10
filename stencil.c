@@ -15,17 +15,18 @@ void init_image(const int nx, const int ny, float * image, float *  tmp_image);
 void output_image(const char * file_name, const int nx, const int ny, float *image);
 double wtime(void);
 int calc_nrows_from_rank(int rank, int size, int ny);
-void stencilMiddle(const int nx, const int ny, float * restrict image, float * restrict tmp_image);
-void sendBottom(const int nx, const int ny, float * restrict tmp_image, int rank);
-void sendTop(const int nx, const int ny, float * restrict tmp_image, int rank);
-void sendMiddle(const int nx, const int ny, float * restrict tmp_image, int rank);
+void stencilMiddle(float * restrict image, float * restrict tmp_image);
+void stencilTop(float * image, float * tmp_image);
+void sendBottom(float * restrict tmp_image, int rank);
+void sendTop(float * restrict tmp_image, int rank);
+void sendMiddle(float * restrict tmp_image, int rank);
 
 int tag = 0;
 MPI_Status status;
-int local_nrows = 0;
-int local_ncols = 0;
-int rem = 0;
-int image_portion;
+int R;
+int n_rows;
+int P;
+int Rem;
 
 int main(int argc, char *argv[]) {
 
@@ -45,8 +46,6 @@ int main(int argc, char *argv[]) {
   //----------------------------------------------------------------------------
 
   int rank;
-  int above;
-  int below;
   int size;
   int flag;
   enum bool {FALSE,TRUE};
@@ -60,21 +59,10 @@ int main(int argc, char *argv[]) {
   MPI_Comm_size( MPI_COMM_WORLD, &size );
   MPI_Comm_rank( MPI_COMM_WORLD, &rank );
 
-  //Calculate size of local rows
-  // local_nrows = calc_nrows_from_rank(rank, size - 1, ny);
-  // local_ncols = ny/(size-1);
-  // rem = ny % (size-1);
-
-  int R = nx;
-  int n_rows = ny/(size-1);
-  int P = R*n_rows;
-  int Rem = (ny%(size-1))*nx;
-
-  printf("%d\n", Rem);
-  above = rank-1;
-  below = rank+1;
-
-  //Check change
+  R = nx;
+  n_rows = ny/(size-1);
+  P = R*n_rows;
+  Rem = (ny%(size-1))*nx;
 
   //Master branch
   if(rank==MASTER){
@@ -87,12 +75,13 @@ int main(int argc, char *argv[]) {
 
     //Distribute
     int process_size = P+R;
-    printf("P+R 1: %d\n", process_size);
 
     //First process
     for (int j = 0; j < process_size; j++) {
         MPI_Ssend(&image[j], 1, MPI_FLOAT, 1, tag, MPI_COMM_WORLD);
     }
+    printf("MASTER 0\n");
+
 
     //Middle sections
     process_size = P+2*R;
@@ -112,20 +101,26 @@ int main(int argc, char *argv[]) {
         MPI_Ssend(&image[start_loc+j],1, MPI_FLOAT, size-1, tag, MPI_COMM_WORLD);
     }
 
+    printf("MASTER 1\n");
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
     // Call the stencil kernel
     double tic = wtime();
 
     //Regather
     for (int n_rank = 1; n_rank < size-1; n_rank++) {
       int start_loc_recv = (n_rank-1)*P;
-      printf("rank: %d, start: %d\n", rank, start_loc_recv);
       for (int k = 0; k < P; k++) {
           MPI_Recv(&image[start_loc_recv + k], 1, MPI_FLOAT, n_rank, tag, MPI_COMM_WORLD, &status);
       }
     }
+    printf("MASTER 2\n");
+
 
     //Last
-    image_portion = P+Rem;
+    int image_portion = P+Rem;
     int start_recv = (size-2)*P;
     for (int k = 0; k < image_portion; k++) {
         MPI_Recv(&image[start_recv + k], 1, MPI_FLOAT, size-1, tag, MPI_COMM_WORLD, &status);
@@ -153,14 +148,30 @@ int main(int argc, char *argv[]) {
     for (int i = 0; i < P+R; i++) {
       MPI_Recv(&image[i], 1, MPI_FLOAT, MASTER, tag, MPI_COMM_WORLD, &status);
     }
+    printf("Rank: %d\n", rank);
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
 
     //Iterate through stencil
-    // for (int i = 0; i < 1; i++) {
-    //   // stencilMiddle(local_nrows, local_ncols, image, tmp_local_image);
-    //   sendTop(local_ncols, local_nrows, tmp_image, rank);
-    //   // stencilMiddle(local_nrows, local_ncols, tmp_local_image, image);
-    //   sendTop(local_ncols, local_nrows, image, rank);
-    // }
+    for (int i = 0; i < 1; i++) {
+      printf("Rank: %d 1\n", rank);
+
+      stencilTop(image, tmp_image);
+      printf("Rank: %d 2\n", rank);
+
+      sendTop(tmp_image, rank);
+      printf("Rank: %d 3\n", rank);
+
+      stencilTop(tmp_image, image);
+      printf("Rank: %d 4\n", rank);
+
+      sendTop(image, rank);
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+    printf("Rank: %d 5\n", rank);
+
+
 
     //Send image portion back to master
     for (int i = 0; i < P; i++) {
@@ -177,14 +188,21 @@ int main(int argc, char *argv[]) {
     for (int i = 0; i < (P+R+Rem); i++) {
       MPI_Recv(&image[i], 1, MPI_FLOAT, MASTER, tag, MPI_COMM_WORLD, &status);
     }
+    MPI_Barrier(MPI_COMM_WORLD);
 
     //Iterate through stencil
-    // for (int i = 0; i < 1; i++) {
-    //   // stencilMiddle(local_nrows, local_ncols, image, tmp_local_image);
-    //   sendBottom(local_ncols, local_nrows, tmp_image, rank);
-    //   // stencilMiddle(local_nrows, local_ncols, tmp_local_image, image);
-    //   sendBottom(local_ncols, local_nrows, image, rank);
-    // }
+    for (int i = 0; i < 1; i++) {
+      printf("Rank: %d 1\n", rank);
+
+      // stencilMiddle(local_nrows, local_ncols, image, tmp_local_image);
+      sendBottom(tmp_image, rank);
+      printf("Rank: %d 2\n", rank);
+
+
+      // stencilMiddle(local_nrows, local_ncols, tmp_local_image, image);
+      sendBottom(image, rank);
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
 
     for (int i = 0; i < P+Rem; i++) {
       MPI_Ssend(&image[R+i],1, MPI_FLOAT, MASTER, tag, MPI_COMM_WORLD);
@@ -202,13 +220,19 @@ int main(int argc, char *argv[]) {
     }
     // printf("Rank %d\n", rank);
 
+    MPI_Barrier(MPI_COMM_WORLD);
+
     //Iterate through stencil
-    // for (int i = 0; i < 1; i++) {
-    //   // stencilMiddle(local_nrows, local_ncols, image, tmp_local_image);
-    //   sendMiddle(local_ncols, local_nrows, tmp_local_image, rank);
-    //   // stencilMiddle(local_nrows, local_ncols, tmp_local_image, image);
-    //   sendMiddle(local_ncols, local_nrows, image, rank);
-    // }
+    for (int i = 0; i < 1; i++) {
+      printf("Rank: %d 1\n", rank);
+      // stencilMiddle(image, tmp_local_image);
+      sendMiddle(tmp_local_image, rank);
+      printf("Rank: %d 1\n", rank);
+
+      // stencilMiddle(tmp_local_image, image);
+      sendMiddle(image, rank);
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
 
     //Send back to master
     for (int i = 0; i < P; i++) {
@@ -216,8 +240,9 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  printf("Rank %d\n", rank);
   MPI_Finalize();
+  printf("Rank %d FINISHED\n", rank);
+
 }
 
 //START HERE
@@ -270,67 +295,97 @@ void stencil(const int nx, const int ny, float * restrict image, float * restric
   // }
 }
 
-// Stencil middle process
-void stencilMiddle(const int nx, const int ny, float * restrict image, float * restrict tmp_image){
-  for (int r = 1; r < ny-1; r++) {
+// Stencil top
+void stencilTop(float * image, float * tmp_image){
+  printf("P: %d, R: %d\n", P, R);
+
+  //Top left
+  tmp_image[0] = image[0]*0.6f + (image[R] + image[1])*0.1f;
+  //Top middle
+  for (int i = 1; i < (R-1); i++) {
+    tmp_image[i] = image[i]*0.6f + (image[i-1] + image[i+R] + image[i+1])*0.1f;
+  }
+  //Top right
+  tmp_image[R-1] = image[R-1]*0.6f + (image[R-2] + image[(R-1)+R])*0.1f;
+
+  //Middle section HERE
+  for (int r = 1; r < n_rows; r++) {
     //Left
-    tmp_image[nx*r] = image[nx*r]*0.6f + (image[nx*(r-1)] + image[nx*(r+1)] + image[nx*r+1])*0.1f;
+    tmp_image[R*r] = image[R*r]*0.6f + (image[R*(r-1)] + image[R*(r+1)] + image[R*r+1])*0.1f;
+    //Middle
+    for (int c = 1; c < R-1; c++) {
+      tmp_image[c+r*R] = image[c+r*R]*0.6f + (image[(c-1)+r*R] + image[(c+1)+r*R] + image[c+(r-1)*R] + image[c+(r+1)*R])*0.1f;
+    }
+    //Right
+    tmp_image[R*(r+1)-1] = image[R*(r+1)-1]*0.6f + (image[R*r-1] + image[R*(r+1)-2] + image[R*(r+2)-1])*0.1f;
+  }
+}
+
+// Stencil middle process
+void stencilMiddle(float * restrict image, float * restrict tmp_image){
+  for (int r = 1; r < n_rows; r++) {
+    //Left
+    tmp_image[R*r] = image[R*r]*0.6f + (image[R*(r-1)] + image[R*(r+1)] + image[R*r+1])*0.1f;
 
     //Middle
-    for (int c = 1; c < nx-1; c++) {
-      tmp_image[c+r*ny] = image[c+r*ny]*0.6f + (image[(c-1)+r*nx] + image[(c+1)+r*nx] + image[c+(r-1)*nx] + image[c+(r+1)*nx])*0.1f;
+    for (int c = 1; c < R-1; c++) {
+      tmp_image[c+r*n_rows] = image[c+r*n_rows]*0.6f + (image[(c-1)+r*R] + image[(c+1)+r*R] + image[c+(r-1)*R] + image[c+(r+1)*R])*0.1f;
     }
 
     //Right
-    tmp_image[nx*(r+1)-1] = image[nx*(r+1)-1]*0.6f + (image[nx*r-1] + image[nx*(r+1)-2] + image[nx*(r+2)-1])*0.1f;
+    tmp_image[R*(r+1)-1] = image[R*(r+1)-1]*0.6f + (image[R*r-1] + image[R*(r+1)-2] + image[R*(r+2)-1])*0.1f;
   }
 }
 
 // Top communication BASIC
-void sendTop(const int local_ncols, const int local_nrows, float * restrict tmp_image, int rank){
+void sendTop(float * restrict tmp_image, int rank){
+
   if(rank%2==0){
-    MPI_Ssend(&tmp_image[local_ncols*(local_nrows+1)], local_ncols, MPI_FLOAT, rank+1, tag, MPI_COMM_WORLD); //Send to rank below
-    MPI_Recv(&tmp_image[local_ncols*local_nrows], local_ncols, MPI_FLOAT, rank+1, tag, MPI_COMM_WORLD, &status); //Receive from below
+    MPI_Ssend(&tmp_image[P-R], R, MPI_FLOAT, rank+1, tag, MPI_COMM_WORLD); //Send to rank below
+    printf("QQQQ\n");
+
+    MPI_Recv(&tmp_image[P], R, MPI_FLOAT, rank+1, tag, MPI_COMM_WORLD, &status); //Receive from below
   }
   else {
-    MPI_Recv(&tmp_image[local_ncols*local_nrows], local_ncols, MPI_FLOAT, rank+1, tag, MPI_COMM_WORLD, &status); //Receive from below
-    MPI_Ssend(&tmp_image[local_ncols*(local_nrows-1)], local_ncols, MPI_FLOAT, rank+1, tag, MPI_COMM_WORLD); //Send to rank below
+    MPI_Recv(&tmp_image[P], R, MPI_FLOAT, rank+1, tag, MPI_COMM_WORLD, &status); //Receive from below
+    printf("SSSS\n");
+    MPI_Ssend(&tmp_image[P-R], R, MPI_FLOAT, rank+1, tag, MPI_COMM_WORLD); //Send to rank below
   }
+  printf("TTTTT\n");
+
 }
 
 // Bottom communication BASIC
-void sendBottom(const int local_ncols, const int local_nrows, float * restrict tmp_image, int rank){
+void sendBottom(float * restrict tmp_image, int rank){
   if(rank%2==0){
-    //Top lines
-    MPI_Ssend(&tmp_image[local_ncols], local_ncols, MPI_FLOAT, rank-1, tag, MPI_COMM_WORLD); //Send top line to rank above
-    MPI_Recv(&tmp_image[0], local_ncols, MPI_FLOAT, rank-1, tag, MPI_COMM_WORLD, &status); //Receive from rank above
+    MPI_Ssend(&tmp_image[R], R, MPI_FLOAT, rank-1, tag, MPI_COMM_WORLD); //Send to rank below
+    MPI_Recv(&tmp_image[0], R, MPI_FLOAT, rank-1, tag, MPI_COMM_WORLD, &status); //Receive from below
   }
-  else{
-    //Top lines
-    MPI_Recv(&tmp_image[0], local_ncols, MPI_FLOAT, rank-1, tag, MPI_COMM_WORLD, &status); //Receive from rank above
-    MPI_Ssend(&tmp_image[local_ncols], local_ncols, MPI_FLOAT, rank-1, tag, MPI_COMM_WORLD); //Send top line to rank above
+  else {
+    MPI_Recv(&tmp_image[0], R, MPI_FLOAT, rank-1, tag, MPI_COMM_WORLD, &status); //Receive from below
+    MPI_Ssend(&tmp_image[R], R, MPI_FLOAT, rank-1, tag, MPI_COMM_WORLD); //Send to rank below
   }
 }
 
 // Middle communication BASIC
-void sendMiddle(const int local_ncols, const int local_nrows, float * restrict tmp_image, int rank){
+void sendMiddle(float * restrict tmp_image, int rank){
   if(rank%2==0){ //Even send up first then receive from above
     //Top lines
-    MPI_Ssend(&tmp_image[local_ncols], local_ncols, MPI_FLOAT, rank-1, tag, MPI_COMM_WORLD); //Send top line to rank above
-    MPI_Recv(&tmp_image[0], local_ncols, MPI_FLOAT, rank-1, tag, MPI_COMM_WORLD, &status); //Receive from rank above
+    MPI_Ssend(&tmp_image[R], R, MPI_FLOAT, rank-1, tag, MPI_COMM_WORLD); //Send top line to rank above
+    MPI_Recv(&tmp_image[0], R, MPI_FLOAT, rank-1, tag, MPI_COMM_WORLD, &status); //Receive from rank above
 
     //Bottom lines
-    MPI_Ssend(&tmp_image[local_ncols*local_nrows], local_ncols, MPI_FLOAT, rank+1, tag, MPI_COMM_WORLD); //Send to rank below
-    MPI_Recv(&tmp_image[local_ncols*(local_nrows+1)], local_ncols, MPI_FLOAT, rank+1, tag, MPI_COMM_WORLD, &status); //Receive from below
+    MPI_Ssend(&tmp_image[P], R, MPI_FLOAT, rank+1, tag, MPI_COMM_WORLD); //Send to rank below
+    MPI_Recv(&tmp_image[P+R], R, MPI_FLOAT, rank+1, tag, MPI_COMM_WORLD, &status); //Receive from below
   }
   else{ //Odd receive first from below then send below
-    //Top lines
-    MPI_Recv(&tmp_image[0], local_ncols, MPI_FLOAT, rank-1, tag, MPI_COMM_WORLD, &status); //Receive from rank above
-    MPI_Ssend(&tmp_image[local_ncols], local_ncols, MPI_FLOAT, rank-1, tag, MPI_COMM_WORLD); //Send top line to rank above
-
     //Bottom lines
-    MPI_Recv(&tmp_image[local_ncols*(local_nrows+1)], local_ncols, MPI_FLOAT, rank+1, tag, MPI_COMM_WORLD, &status); //Receive from below
-    MPI_Ssend(&tmp_image[local_ncols*local_nrows], local_ncols, MPI_FLOAT, rank+1, tag, MPI_COMM_WORLD); //Send to rank below
+    MPI_Recv(&tmp_image[P+R], R, MPI_FLOAT, rank+1, tag, MPI_COMM_WORLD, &status); //Receive from below
+    MPI_Ssend(&tmp_image[P], R, MPI_FLOAT, rank+1, tag, MPI_COMM_WORLD); //Send to rank below
+
+    //Top lines
+    MPI_Recv(&tmp_image[0], R, MPI_FLOAT, rank-1, tag, MPI_COMM_WORLD, &status); //Receive from rank above
+    MPI_Ssend(&tmp_image[R], R, MPI_FLOAT, rank-1, tag, MPI_COMM_WORLD); //Send top line to rank above
   }
 }
 
