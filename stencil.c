@@ -74,6 +74,8 @@ int main(int argc, char *argv[]) {
   above = rank-1;
   below = rank+1;
 
+  //Check change
+
   //Master branch
   if(rank==MASTER){
 
