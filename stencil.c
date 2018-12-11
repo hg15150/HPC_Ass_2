@@ -15,9 +15,9 @@ void init_image(const int nx, const int ny, float * image, float *  tmp_image);
 void output_image(const char * file_name, const int nx, const int ny, float *image);
 double wtime(void);
 int calc_nrows_from_rank(int rank, int size, int ny);
-void stencilMiddle(float * image, float * tmp_image);
-void stencilTop(float * image, float * tmp_image);
-void stencilBottom(float * image, float * tmp_image);
+void stencilMiddle(float * restrict image, float * tmp_image);
+void stencilTop(float * restrict image, float * tmp_image);
+void stencilBottom(float * restrict image, float * tmp_image);
 void sendBottom(float * restrict tmp_image, int rank);
 void sendTop(float * restrict tmp_image, int rank);
 void sendMiddle(float * restrict tmp_image, int rank);
@@ -42,6 +42,7 @@ int main(int argc, char *argv[]) {
   int nx = atoi(argv[1]);     //Dimension x
   int ny = atoi(argv[2]);     //Dimension y
   int niters = atoi(argv[3]); //Number of iterations
+  // niters = 100;
 
   //----------------------------------------------------------------------------
   //MPI section here
@@ -62,14 +63,14 @@ int main(int argc, char *argv[]) {
   MPI_Comm_rank( MPI_COMM_WORLD, &rank );
 
   R = nx;
-  n_rows = ny/(size-1);
+  n_rows = ny/(size);
   P = R*n_rows;
-  Rem = (ny%(size-1))*nx;
-  rem_rows = ny%(size-1);
+  Rem = (ny%(size))*nx;
+  rem_rows = ny%(size);
+
 
   //Master branch
   if(rank==MASTER){
-
     // Allocate the image
     float *image = malloc(sizeof(float)*nx*ny);
     float *tmp_image = malloc(sizeof(float)*nx*ny);
@@ -77,25 +78,25 @@ int main(int argc, char *argv[]) {
     init_image(nx, ny, image, tmp_image);
 
     //Distribute
-    int process_size = P+R;
+    // int process_size = P+R;
 
-    //First process
-    for (int j = 0; j < process_size; j++) {
-        MPI_Ssend(&image[j], 1, MPI_FLOAT, 1, tag, MPI_COMM_WORLD);
-    }
+    // //First process
+    // for (int j = 0; j < process_size; j++) {
+    //     MPI_Ssend(&image[j], 1, MPI_FLOAT, 1, tag, MPI_COMM_WORLD);
+    // }
 
     //Middle sections
-    process_size = P+2*R;
+    int process_size = P+2*R;
     int start_loc = P-R;
-    for (int i = 2; i < (size-1); i++) {
-      start_loc = ((i-1)*P)-R;
+    for (int i = 1; i < (size-1); i++) {
+      start_loc = (i*P)-R;
       for (int j = 0; j < process_size; j++) {
           MPI_Ssend(&image[start_loc+j],1, MPI_FLOAT, i, tag, MPI_COMM_WORLD);
       }
     }
 
     //End section
-    start_loc = ((size-2)*P)-R;
+    start_loc = ((size-1)*P)-R;
     process_size = P+R+Rem;
 
     for (int j = 0; j < process_size; j++) {
@@ -103,7 +104,7 @@ int main(int argc, char *argv[]) {
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
-
+    double tic = wtime();
     //Iterate through stencil
     for (int i = 0; i < niters; i++) {
       stencilTop(image, tmp_image);
@@ -112,13 +113,12 @@ int main(int argc, char *argv[]) {
       sendTop(image, rank);
     }
 
-    double tic = wtime();
     MPI_Barrier(MPI_COMM_WORLD);
     double toc = wtime();
 
     //Regather
     for (int n_rank = 1; n_rank < size-1; n_rank++) {
-      int start_loc_recv = (n_rank-1)*P;
+      int start_loc_recv = n_rank*P;
       for (int k = 0; k < P; k++) {
           MPI_Recv(&image[start_loc_recv + k], 1, MPI_FLOAT, n_rank, tag, MPI_COMM_WORLD, &status);
       }
@@ -126,7 +126,7 @@ int main(int argc, char *argv[]) {
 
     //Last
     int image_portion = P+Rem;
-    int start_recv = (size-2)*P;
+    int start_recv = (size-1)*P;
     for (int k = 0; k < image_portion; k++) {
         MPI_Recv(&image[start_recv + k], 1, MPI_FLOAT, size-1, tag, MPI_COMM_WORLD, &status);
     }
@@ -140,6 +140,7 @@ int main(int argc, char *argv[]) {
     free(image);
   }
 
+  /*
   //First process
   /*
   else if(rank == 1){
@@ -223,8 +224,7 @@ int main(int argc, char *argv[]) {
   }
 
   MPI_Finalize();
-  // printf("Rank %d FINISHED\n", rank);
-
+  printf("Rank %d FINISHED\n", rank);
 }
 
 // Stencil given image
@@ -275,7 +275,7 @@ void stencil(const int nx, const int ny, float * restrict image, float * restric
 }
 
 // Stencil bottom
-void stencilBottom(float * image, float * tmp_image){
+void stencilBottom(float * restrict image, float * restrict tmp_image){
   //Middle section HERE
   for (int r = 1; r < (n_rows+rem_rows); r++) {
     //Left
@@ -301,7 +301,7 @@ void stencilBottom(float * image, float * tmp_image){
 }
 
 // Stencil top
-void stencilTop(float * image, float * tmp_image){
+void stencilTop(float * restrict image, float * restrict tmp_image){
   //Top left
   tmp_image[0] = image[0]*0.6f + (image[R] + image[1])*0.1f;
   //Top middle
@@ -325,7 +325,7 @@ void stencilTop(float * image, float * tmp_image){
 }
 
 // Stencil middle process
-void stencilMiddle(float * image, float * tmp_image){
+void stencilMiddle(float * restrict image, float * restrict tmp_image){
   for (int j = 1; j <= n_rows; j++) {
     //Left
     tmp_image[R*j] = image[R*j]*0.6f + (image[R*(j-1)] + image[R*(j+1)] + image[R*j+1])*0.1f;
