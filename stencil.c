@@ -42,6 +42,7 @@ int main(int argc, char *argv[]) {
   int nx = atoi(argv[1]);     //Dimension x
   int ny = atoi(argv[2]);     //Dimension y
   int niters = atoi(argv[3]); //Number of iterations
+  // niters = 100;
 
   //----------------------------------------------------------------------------
   //MPI section here
@@ -62,14 +63,14 @@ int main(int argc, char *argv[]) {
   MPI_Comm_rank( MPI_COMM_WORLD, &rank );
 
   R = nx;
-  n_rows = ny/(size-1);
+  n_rows = ny/(size);
   P = R*n_rows;
-  Rem = (ny%(size-1))*nx;
-  rem_rows = ny%(size-1);
+  Rem = (ny%(size))*nx;
+  rem_rows = ny%(size);
+
 
   //Master branch
   if(rank==MASTER){
-
     // Allocate the image
     float *image = malloc(sizeof(float)*nx*ny);
     float *tmp_image = malloc(sizeof(float)*nx*ny);
@@ -77,25 +78,25 @@ int main(int argc, char *argv[]) {
     init_image(nx, ny, image, tmp_image);
 
     //Distribute
-    int process_size = P+R;
+    // int process_size = P+R;
 
-    //First process
-    for (int j = 0; j < process_size; j++) {
-        MPI_Ssend(&image[j], 1, MPI_FLOAT, 1, tag, MPI_COMM_WORLD);
-    }
+    // //First process
+    // for (int j = 0; j < process_size; j++) {
+    //     MPI_Ssend(&image[j], 1, MPI_FLOAT, 1, tag, MPI_COMM_WORLD);
+    // }
 
     //Middle sections
-    process_size = P+2*R;
+    int process_size = P+2*R;
     int start_loc = P-R;
-    for (int i = 2; i < (size-1); i++) {
-      start_loc = ((i-1)*P)-R;
+    for (int i = 1; i < (size-1); i++) {
+      start_loc = (i*P)-R;
       for (int j = 0; j < process_size; j++) {
           MPI_Ssend(&image[start_loc+j],1, MPI_FLOAT, i, tag, MPI_COMM_WORLD);
       }
     }
 
     //End section
-    start_loc = ((size-2)*P)-R;
+    start_loc = ((size-1)*P)-R;
     process_size = P+R+Rem;
 
     for (int j = 0; j < process_size; j++) {
@@ -103,14 +104,21 @@ int main(int argc, char *argv[]) {
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
-    // Call the stencil kernel
     double tic = wtime();
+    //Iterate through stencil
+    for (int i = 0; i < niters; i++) {
+      stencilTop(image, tmp_image);
+      sendTop(tmp_image, rank);
+      stencilTop(tmp_image, image);
+      sendTop(image, rank);
+    }
+
     MPI_Barrier(MPI_COMM_WORLD);
     double toc = wtime();
 
     //Regather
     for (int n_rank = 1; n_rank < size-1; n_rank++) {
-      int start_loc_recv = (n_rank-1)*P;
+      int start_loc_recv = n_rank*P;
       for (int k = 0; k < P; k++) {
           MPI_Recv(&image[start_loc_recv + k], 1, MPI_FLOAT, n_rank, tag, MPI_COMM_WORLD, &status);
       }
@@ -118,7 +126,7 @@ int main(int argc, char *argv[]) {
 
     //Last
     int image_portion = P+Rem;
-    int start_recv = (size-2)*P;
+    int start_recv = (size-1)*P;
     for (int k = 0; k < image_portion; k++) {
         MPI_Recv(&image[start_recv + k], 1, MPI_FLOAT, size-1, tag, MPI_COMM_WORLD, &status);
     }
@@ -132,6 +140,7 @@ int main(int argc, char *argv[]) {
     free(image);
   }
 
+  /*
   //First process
   else if(rank == 1){
     // Allocate the image
@@ -159,6 +168,7 @@ int main(int argc, char *argv[]) {
       MPI_Ssend(&image[i],1, MPI_FLOAT, MASTER, tag, MPI_COMM_WORLD);
     }
   }
+  */
 
   //Last process
   else if(rank == (size - 1)){
@@ -213,8 +223,7 @@ int main(int argc, char *argv[]) {
   }
 
   MPI_Finalize();
-  // printf("Rank %d FINISHED\n", rank);
-
+  printf("Rank %d FINISHED\n", rank);
 }
 
 // Stencil given image
