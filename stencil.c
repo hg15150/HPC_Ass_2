@@ -103,11 +103,10 @@ int main(int argc, char *argv[]) {
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
-
-    MPI_Barrier(MPI_COMM_WORLD);
-
     // Call the stencil kernel
     double tic = wtime();
+    MPI_Barrier(MPI_COMM_WORLD);
+    double toc = wtime();
 
     //Regather
     for (int n_rank = 1; n_rank < size-1; n_rank++) {
@@ -123,8 +122,6 @@ int main(int argc, char *argv[]) {
     for (int k = 0; k < image_portion; k++) {
         MPI_Recv(&image[start_recv + k], 1, MPI_FLOAT, size-1, tag, MPI_COMM_WORLD, &status);
     }
-
-    double toc = wtime();
 
     // Output
     printf("------------------------------------\n");
@@ -216,7 +213,7 @@ int main(int argc, char *argv[]) {
   }
 
   MPI_Finalize();
-  printf("Rank %d FINISHED\n", rank);
+  // printf("Rank %d FINISHED\n", rank);
 
 }
 
