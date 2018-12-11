@@ -104,10 +104,17 @@ int main(int argc, char *argv[]) {
 
     MPI_Barrier(MPI_COMM_WORLD);
 
-    MPI_Barrier(MPI_COMM_WORLD);
+    //Iterate through stencil
+    for (int i = 0; i < niters; i++) {
+      stencilTop(image, tmp_image);
+      sendTop(tmp_image, rank);
+      stencilTop(tmp_image, image);
+      sendTop(image, rank);
+    }
 
-    // Call the stencil kernel
     double tic = wtime();
+    MPI_Barrier(MPI_COMM_WORLD);
+    double toc = wtime();
 
     //Regather
     for (int n_rank = 1; n_rank < size-1; n_rank++) {
@@ -124,8 +131,6 @@ int main(int argc, char *argv[]) {
         MPI_Recv(&image[start_recv + k], 1, MPI_FLOAT, size-1, tag, MPI_COMM_WORLD, &status);
     }
 
-    double toc = wtime();
-
     // Output
     printf("------------------------------------\n");
     printf(" runtime: %lf s\n", toc-tic);
@@ -136,6 +141,7 @@ int main(int argc, char *argv[]) {
   }
 
   //First process
+  /*
   else if(rank == 1){
     // Allocate the image
     float *image = malloc(sizeof(float)*(P+R));
@@ -162,6 +168,7 @@ int main(int argc, char *argv[]) {
       MPI_Ssend(&image[i],1, MPI_FLOAT, MASTER, tag, MPI_COMM_WORLD);
     }
   }
+  */
 
   //Last process
   else if(rank == (size - 1)){
@@ -216,7 +223,7 @@ int main(int argc, char *argv[]) {
   }
 
   MPI_Finalize();
-  printf("Rank %d FINISHED\n", rank);
+  // printf("Rank %d FINISHED\n", rank);
 
 }
 
