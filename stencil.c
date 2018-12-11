@@ -15,9 +15,9 @@ void init_image(const int nx, const int ny, float * image, float *  tmp_image);
 void output_image(const char * file_name, const int nx, const int ny, float *image);
 double wtime(void);
 int calc_nrows_from_rank(int rank, int size, int ny);
-void stencilMiddle(float * image, float * tmp_image);
-void stencilTop(float * image, float * tmp_image);
-void stencilBottom(float * image, float * tmp_image);
+void stencilMiddle(float * restrict image, float * tmp_image);
+void stencilTop(float * restrict image, float * tmp_image);
+void stencilBottom(float * restrict image, float * tmp_image);
 void sendBottom(float * restrict tmp_image, int rank);
 void sendTop(float * restrict tmp_image, int rank);
 void sendMiddle(float * restrict tmp_image, int rank);
@@ -274,7 +274,7 @@ void stencil(const int nx, const int ny, float * restrict image, float * restric
 }
 
 // Stencil bottom
-void stencilBottom(float * image, float * tmp_image){
+void stencilBottom(float * restrict image, float * restrict tmp_image){
   //Middle section HERE
   for (int r = 1; r < (n_rows+rem_rows); r++) {
     //Left
@@ -300,7 +300,7 @@ void stencilBottom(float * image, float * tmp_image){
 }
 
 // Stencil top
-void stencilTop(float * image, float * tmp_image){
+void stencilTop(float * restrict image, float * restrict tmp_image){
   //Top left
   tmp_image[0] = image[0]*0.6f + (image[R] + image[1])*0.1f;
   //Top middle
@@ -324,7 +324,7 @@ void stencilTop(float * image, float * tmp_image){
 }
 
 // Stencil middle process
-void stencilMiddle(float * image, float * tmp_image){
+void stencilMiddle(float * restrict image, float * restrict tmp_image){
   for (int j = 1; j <= n_rows; j++) {
     //Left
     tmp_image[R*j] = image[R*j]*0.6f + (image[R*(j-1)] + image[R*(j+1)] + image[R*j+1])*0.1f;
